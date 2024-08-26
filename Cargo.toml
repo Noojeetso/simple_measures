@@ -1,0 +1,11 @@
+[package]
+authors = ["Noojee"]
+year = "2024"
+name = "simple_measures"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+prettytable-rs = "^0.10"
+nix = { version = "^0.29", features = ["signal"] }
