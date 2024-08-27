@@ -1,6 +1,9 @@
+use crate::description;
+
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::ops::DerefMut;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -8,96 +11,12 @@ use std::{collections::HashMap, marker::PhantomData};
 
 const DATA_DIR: &str = "data";
 
-mod nix_function_threshold {
-    use nix::errno::Errno;
-    use nix::sys::signal::{kill, Signal};
-    use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-    use nix::unistd::{fork, ForkResult};
-    use std::process::exit;
-    use std::time::Duration;
-
-    pub unsafe fn call_long_running_function<ArgT, ResT, F: Fn(&ArgT) -> ResT>(
-        function: &F,
-        data: &ArgT,
-        threshold: Duration,
-    ) -> bool {
-        let mut result = false;
-
-        let child_pid = match fork() {
-            Ok(ForkResult::Child) => {
-                _ = function(data);
-                exit(0);
-            }
-
-            Ok(ForkResult::Parent { child, .. }) => {
-                // println!(
-                //     "[call_long_running_function] forked a child with PID {}.",
-                //     child
-                // );
-                child
-            }
-
-            Err(err) => {
-                panic!("[call_long_running_function] fork() failed: {}", err);
-            }
-        };
-
-        // println!("Child pid: {}", child_pid);
-
-        let time = std::time::Instant::now();
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs_f64(0.1));
-            match waitpid(child_pid, Some(WaitPidFlag::WNOHANG)) {
-                Ok(WaitStatus::StillAlive) => {
-                    // println!(
-                    //     "[call_long_running_function] Child is still alive, do my own stuff while waiting."
-                    // );
-                }
-
-                Ok(_status) => {
-                    // println!(
-                    //     "[call_long_running_function] Child exited with status {:?}.",
-                    //     status
-                    // );
-                    result = true;
-                    break;
-                }
-
-                Err(err) => panic!("[call_long_running_function] waitpid() failed: {}", err),
-            }
-            let took = time.elapsed();
-            if took > threshold {
-                match kill(child_pid, Signal::SIGKILL) {
-                    Ok(_) => {
-                        // println!("Sent termination signal to the child process");
-                    }
-                    Err(err) => {
-                        if err != Errno::ESRCH {
-                            eprintln!(
-                                "[call_long_running_function] Error sending termination signal: {}",
-                                err
-                            );
-                        } else {
-                            // println!(
-                            //     "We tried to send a signal, but process has already been terminated"
-                            // )
-                        }
-                    }
-                }
-                break;
-            }
-        }
-        // println!("result: {}", result);
-
-        return result;
-    }
-}
-
 pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
-    pub name: String,
+    pub filename: String,
+    pub description: String,
     pub algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
     pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>>,
     gen_art: PhantomData<GenArgT>,
@@ -107,21 +26,27 @@ where
 
 impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
     pub fn new(
-        name: &str,
+        description: &str,
         algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
         generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>,
     ) -> Self {
         MeasurableAlgorithm {
-            name: name.to_string(),
+            description: description.to_string(),
+            filename: description.to_string(),
             algorithm,
             generator: RefCell::new(generator),
             gen_art: PhantomData,
             alg_art: PhantomData,
             alg_res: PhantomData,
         }
+    }
+
+    pub fn with_filename(mut self, filename: &str) -> Self {
+        self.filename = filename.to_string();
+        self
     }
 
     fn measure(&self, sizes: &[GenArgT], iterations_amount: u64) -> Vec<Duration> {
@@ -162,7 +87,7 @@ where
         let mut generator = self.generator.borrow_mut();
         let mut lock = stdout().lock();
         unsafe {
-            println!("Алгоритм: {}", self.name);
+            println!("Алгоритм: {}", self.description);
             for size in sizes {
                 write!(lock, "Линейный размер входных данных: {}\t\r", size).unwrap();
                 _ = std::io::stdout().flush();
@@ -185,24 +110,24 @@ where
 
 impl<'a, GenArgT, AlgArgT, AlgResT> PartialEq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.filename == other.filename
     }
 }
 
 impl<'a, GenArgT, AlgArgT, AlgResT> Eq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> where
-    GenArgT: std::fmt::Display
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize
 {
 }
 
 impl<'a, GenArgT, AlgArgT, AlgResT> Hash for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
+        self.filename.hash(state);
     }
 }
 
@@ -213,9 +138,10 @@ pub struct AlgorithmTimeStatistic {
 
 pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
-    name: String,
+    description: String,
+    filename: String,
     sizes: Vec<GenArgT>,
     x_label: String,
     y_label: String,
@@ -228,11 +154,12 @@ where
 
 impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
 where
-    GenArgT: std::fmt::Display,
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
     pub fn new(name: &str, sizes: Vec<GenArgT>) -> Self {
         PackMeasures {
-            name: name.to_string(),
+            description: name.to_string(),
+            filename: name.to_string(),
             sizes,
             x_label: String::from_str("Аргументы функций").unwrap(),
             y_label: String::from_str("Значения функций").unwrap(),
@@ -241,6 +168,11 @@ where
             time_statistics: HashMap::new(),
             need_max_sizes_update: true,
         }
+    }
+
+    pub fn with_filename(mut self, filename: &str) -> Self {
+        self.filename = filename.to_string();
+        self
     }
 
     pub fn with_x_label(mut self, x_label: &str) -> Self {
@@ -286,10 +218,10 @@ where
             self.calculate_max_data_sizes();
             self.need_max_sizes_update = false;
         }
-        println!("Замер времени выполнения ({})", self.name);
+        println!("Замер времени выполнения ({})", self.description);
         let time = std::time::Instant::now();
         for (algorithm, statistic) in self.time_statistics.iter_mut() {
-            println!("Алгоритм: {}", algorithm.name);
+            println!("Алгоритм: {}", algorithm.description);
             let mut lock = stdout().lock();
             for i in 0..measures_amount {
                 write!(lock, "Номер замера: {}/{}\t\r", i + 1, measures_amount).unwrap();
@@ -324,10 +256,40 @@ where
         }
     }
 
-    pub fn write(&self) {
+    pub fn write(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::Write;
+        let data_path = PathBuf::from_str(DATA_DIR)?;
+        if !data_path.is_dir() {
+            std::fs::create_dir_all(data_path)?;
+        }
+        let mut descriptions = vec![];
         for (algorithm, statistic) in self.time_statistics.iter() {
-            let relative_path = format!("{}/{}/{}/", DATA_DIR, self.name, algorithm.name);
+            let target_description = description::TargetDescription {
+                filename: algorithm.filename.clone(),
+                description: algorithm.description.clone(),
+                max_size_number: statistic.max_size_number,
+            };
+            descriptions.push(target_description);
+        }
+        let pack_description = description::PackMeasuresDescription {
+            filename: self.filename.clone(),
+            description: self.description.clone(),
+            sizes: self.sizes.clone(),
+            x_label: self.x_label.clone(),
+            y_label: self.y_label.clone(),
+            iterations_amount: self.iterations_amount,
+            threshold: self.threshold,
+            target_descriptions: descriptions,
+        };
+        let pack_description_file_path =
+            PathBuf::from_str(format!("{}/{}/", DATA_DIR, self.filename).as_str())?;
+        println!(
+            "path: {}",
+            pack_description_file_path.as_os_str().to_str().unwrap()
+        );
+        pack_description.write(&pack_description_file_path)?;
+        for (algorithm, statistic) in self.time_statistics.iter() {
+            let relative_path = format!("{}/{}/{}/", DATA_DIR, self.filename, algorithm.filename);
             std::fs::create_dir_all(&relative_path)
                 .expect(format!("Не удалось создать каталог {}", relative_path).as_str());
             for i in 0..statistic.max_size_number {
@@ -335,8 +297,7 @@ where
                 let mut file = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&file_path)
-                    .expect("Не удалось создать файл");
+                    .open(&file_path)?;
 
                 let res_str = statistic.measures[i]
                     .iter()
@@ -348,9 +309,11 @@ where
 
                 if let Err(e) = file.write(res_str.as_bytes()) {
                     eprintln!("Ошибка при записи в файл: {}", e);
+                    return Err(e.into());
                 };
             }
         }
+        Ok(())
     }
 
     pub fn print(&self) {
@@ -359,10 +322,10 @@ where
         let mut cells: Vec<Cell> = Vec::new();
         cells.push(Cell::new(&self.x_label));
         for algorithm in self.time_statistics.keys() {
-            cells.push(Cell::new(algorithm.name.as_str()));
+            cells.push(Cell::new(&algorithm.description.as_str()));
         }
         table.add_row(Row::new(vec![Cell::new_align(
-            self.name.as_str(),
+            self.filename.as_str(),
             Alignment::CENTER,
         )
         .with_hspan(self.time_statistics.keys().len() + 1)]));
@@ -390,5 +353,67 @@ where
 
         println!("{}", self.y_label);
         table.printstd();
+    }
+}
+
+mod nix_function_threshold {
+    use nix::errno::Errno;
+    use nix::sys::signal::{kill, Signal};
+    use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+    use nix::unistd::{fork, ForkResult};
+    use std::process::exit;
+    use std::time::Duration;
+
+    pub unsafe fn call_long_running_function<ArgT, ResT, F: Fn(&ArgT) -> ResT>(
+        function: &F,
+        data: &ArgT,
+        threshold: Duration,
+    ) -> bool {
+        let mut result = false;
+
+        let child_pid = match fork() {
+            Ok(ForkResult::Child) => {
+                _ = function(data);
+                exit(0);
+            }
+
+            Ok(ForkResult::Parent { child, .. }) => child,
+
+            Err(err) => {
+                panic!("[call_long_running_function] fork() failed: {}", err);
+            }
+        };
+
+        let time = std::time::Instant::now();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs_f64(0.1));
+            match waitpid(child_pid, Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::StillAlive) => {}
+
+                Ok(_status) => {
+                    result = true;
+                    break;
+                }
+
+                Err(err) => panic!("[call_long_running_function] waitpid() failed: {}", err),
+            }
+            let took = time.elapsed();
+            if took > threshold {
+                match kill(child_pid, Signal::SIGKILL) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if err != Errno::ESRCH {
+                            panic!(
+                                "[call_long_running_function] Error sending termination signal: {}",
+                                err
+                            );
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        return result;
     }
 }
