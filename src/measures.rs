@@ -1,45 +1,46 @@
 use crate::description;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
-use std::{collections::HashMap, marker::PhantomData};
 
 const DATA_DIR: &str = "data";
 
-pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
-{
+pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
     pub filename: String,
     pub description: String,
     pub algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
     pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>>,
-    gen_art: PhantomData<GenArgT>,
-    alg_art: PhantomData<AlgArgT>,
+    gen_arg: PhantomData<GenArgT>,
+    // gen_res: PhantomData<GenResT>,
+    alg_arg: PhantomData<AlgArgT>,
     alg_res: PhantomData<AlgResT>,
 }
 
 impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
+// where
+// GenResT: AsRef<AlgArgT>,
+// for<'b> &'b GenResT: AsRef<&'b AlgArgT>,
 {
     pub fn new(
         description: &str,
         algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
         generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>,
     ) -> Self {
-        MeasurableAlgorithm {
+        Self {
             description: description.to_string(),
             filename: description.to_string(),
             algorithm,
             generator: RefCell::new(generator),
-            gen_art: PhantomData,
-            alg_art: PhantomData,
+            gen_arg: PhantomData,
+            // gen_res: PhantomData,
+            alg_arg: PhantomData,
             alg_res: PhantomData,
         }
     }
@@ -54,10 +55,10 @@ where
 
         let mut generator = self.generator.borrow_mut();
 
-        for size in sizes {
+        for size in sizes.iter() {
             let mut current_elapsed_time = Duration::new(0, 0);
 
-            let data: AlgArgT = (generator.deref_mut())(size);
+            let data = (generator.deref_mut())(size);
 
             let stopwatch: SystemTime = SystemTime::now();
             // let stopwatch = ProcessTime::now();
@@ -80,7 +81,13 @@ where
 
         elapsed_time_for_sizes
     }
+}
 
+impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
+where
+    // GenResT: AsRef<AlgArgT>,
+    GenArgT: std::fmt::Display,
+{
     fn calculate_max_data_size(&self, sizes: &[GenArgT], threshold: Duration) -> usize {
         use std::io::{stdout, Write};
         let mut max_size_index: usize = 0;
@@ -108,24 +115,17 @@ where
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PartialEq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
+impl<'a, GenArgT, AlgArgT, AlgResT> PartialEq
+    for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 {
     fn eq(&self, other: &Self) -> bool {
         self.filename == other.filename
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> Eq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize
-{
-}
+impl<'a, GenArgT, AlgArgT, AlgResT> Eq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {}
 
-impl<'a, GenArgT, AlgArgT, AlgResT> Hash for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
-{
+impl<'a, GenArgT, AlgArgT, AlgResT> Hash for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.filename.hash(state);
     }
@@ -136,10 +136,7 @@ pub struct AlgorithmTimeStatistic {
     pub measures: Vec<Vec<Duration>>,
 }
 
-pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
-{
+pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
     description: String,
     filename: String,
     sizes: Vec<GenArgT>,
@@ -152,10 +149,7 @@ where
     need_max_sizes_update: bool,
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
-where
-    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
-{
+impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
     pub fn new(name: &str, sizes: Vec<GenArgT>) -> Self {
         PackMeasures {
             description: name.to_string(),
@@ -211,7 +205,13 @@ where
             },
         );
     }
+}
 
+impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
+where
+    // GenResT: AsRef<AlgArgT>,
+    GenArgT: std::fmt::Display + Clone,
+{
     pub fn measure(&mut self, measures_amount: u64) {
         use std::io::{stdout, Write};
         if self.need_max_sizes_update {
@@ -255,7 +255,12 @@ where
                 .resize(statistics.max_size_number, vec![]);
         }
     }
+}
 
+impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
+where
+    GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
+{
     pub fn write(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::Write;
         let data_path = PathBuf::from_str(DATA_DIR)?;
@@ -364,9 +369,9 @@ mod nix_function_threshold {
     use std::process::exit;
     use std::time::Duration;
 
-    pub unsafe fn call_long_running_function<ArgT, ResT, F: Fn(&ArgT) -> ResT>(
+    pub unsafe fn call_long_running_function<AlgArgT, ResT, F: Fn(&AlgArgT) -> ResT>(
         function: &F,
-        data: &ArgT,
+        data: &AlgArgT,
         threshold: Duration,
     ) -> bool {
         let mut result = false;

@@ -1,4 +1,4 @@
 .vscode
-.old
+*.old
 target
 Cargo.lock
