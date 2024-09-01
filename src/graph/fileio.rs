@@ -149,12 +149,10 @@ pub fn read_csv_file(
     Ok((headers, rows))
 }
 
-// pub fn safe_remove(path: &std::path::Path) {}
-
 pub fn recreate_dir_all(path: &std::path::Path) -> IOResult<()> {
     if path.exists() {
         if !path.is_dir() {
-            std::fs::remove_file(path);
+            std::fs::remove_file(path)?;
         } else {
             std::fs::remove_dir_all(path)?;
         }

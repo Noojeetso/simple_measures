@@ -92,13 +92,13 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
                 Algorithm::NonMutatingAlgorithm(algorithm) => {
                     for _ in 0..iterations_amount as usize {
                         let curr_data = data.pop().unwrap();
-                        (algorithm)(&curr_data);
+                        _ = algorithm(&curr_data);
                     }
                 }
                 Algorithm::MutatingAlgorithm(algorithm) => {
                     for _ in 0..iterations_amount as usize {
                         let mut curr_data = data.pop().unwrap();
-                        (algorithm)(&mut curr_data);
+                        _ = algorithm(&mut curr_data);
                     }
                 }
             }
@@ -125,6 +125,7 @@ where
     GenArgT: std::fmt::Display,
 {
     fn calculate_max_data_size(&self, sizes: &[GenArgT], threshold: Duration) -> usize {
+        use crate::nix_function_threshold;
         use std::io::{stdout, Write};
         let mut max_size_index: usize = 0;
         let mut generator = self.generator.borrow_mut();
@@ -132,7 +133,12 @@ where
         unsafe {
             println!("Алгоритм: {}", self.description);
             for size in sizes {
-                write!(lock, "Линейный размер входных данных: {}\t\r", size).unwrap();
+                write!(
+                    lock,
+                    "Максимальный линейный размер входных данных: {}\t\r",
+                    size
+                )
+                .unwrap();
                 _ = std::io::stdout().flush();
                 let data = (generator.deref_mut())(size);
                 let res = nix_function_threshold::call_long_running_function(
@@ -179,6 +185,7 @@ pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
     x_label: String,
     y_label: String,
     iterations_amount: u64,
+    use_threshold: bool,
     threshold: Duration,
     time_statistics:
         HashMap<MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>, AlgorithmTimeStatistic>,
@@ -194,6 +201,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
             x_label: String::from_str("Аргументы функций").unwrap(),
             y_label: String::from_str("Значения функций").unwrap(),
             iterations_amount: 5,
+            use_threshold: false,
             threshold: Duration::new(1, 0),
             time_statistics: HashMap::new(),
             need_max_sizes_update: true,
@@ -227,6 +235,10 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
 
     pub fn set_threshold(&mut self, threshold: Duration) {
         self.threshold = threshold;
+    }
+
+    pub fn use_threshold(&mut self, condition: bool) {
+        self.use_threshold = condition;
     }
 
     pub fn add_target(
@@ -276,14 +288,20 @@ where
     }
 
     pub fn calculate_max_data_sizes(&mut self) {
-        println!("Расчёт максимальных размеров");
-        let time = std::time::Instant::now();
-        for (algorithm, statistics) in self.time_statistics.iter_mut() {
-            statistics.max_size_number =
-                algorithm.calculate_max_data_size(&self.sizes, self.threshold);
+        if self.use_threshold {
+            println!("Расчёт максимальных размеров");
+            let time = std::time::Instant::now();
+            for (algorithm, statistics) in self.time_statistics.iter_mut() {
+                statistics.max_size_number =
+                    algorithm.calculate_max_data_size(&self.sizes, self.threshold);
+            }
+            let took = time.elapsed();
+            println!("Расчёт занял {:.3}с\n", took.as_secs_f64());
+        } else {
+            for (_, statistics) in self.time_statistics.iter_mut() {
+                statistics.max_size_number = self.sizes.len();
+            }
         }
-        let took = time.elapsed();
-        println!("Расчёт занял {:.3}с\n", took.as_secs_f64());
         for statistics in self.time_statistics.values_mut() {
             statistics
                 .measures
@@ -323,10 +341,10 @@ where
         };
         let pack_description_file_path =
             PathBuf::from_str(format!("{}/{}/", DATA_DIR, self.filename).as_str())?;
-        println!(
-            "path: {}",
-            pack_description_file_path.as_os_str().to_str().unwrap()
-        );
+        // println!(
+        //     "path: {}\n",
+        //     pack_description_file_path.as_os_str().to_str().unwrap()
+        // );
         pack_description.write(&pack_description_file_path)?;
         for (algorithm, statistic) in self.time_statistics.iter() {
             let relative_path = format!("{}/{}/{}/", DATA_DIR, self.filename, algorithm.filename);
@@ -393,71 +411,5 @@ where
 
         println!("{}", self.y_label);
         table.printstd();
-    }
-}
-
-mod nix_function_threshold {
-    use super::Algorithm;
-    use nix::errno::Errno;
-    use nix::sys::signal::{kill, Signal};
-    use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-    use nix::unistd::{fork, ForkResult};
-    use std::process::exit;
-    use std::time::Duration;
-
-    pub unsafe fn call_long_running_function<'a, AlgArgT, ResT>(
-        function: &Algorithm<'a, AlgArgT, ResT>,
-        mut data: AlgArgT,
-        threshold: Duration,
-    ) -> bool {
-        let mut result = false;
-
-        let child_pid = match fork() {
-            Ok(ForkResult::Child) => {
-                match function {
-                    Algorithm::NonMutatingAlgorithm(function) => _ = function(&data),
-                    Algorithm::MutatingAlgorithm(function) => _ = function(&mut data),
-                }
-                exit(0);
-            }
-
-            Ok(ForkResult::Parent { child, .. }) => child,
-
-            Err(err) => {
-                panic!("[call_long_running_function] fork() failed: {}", err);
-            }
-        };
-
-        let time = std::time::Instant::now();
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs_f64(0.1));
-            match waitpid(child_pid, Some(WaitPidFlag::WNOHANG)) {
-                Ok(WaitStatus::StillAlive) => {}
-
-                Ok(_status) => {
-                    result = true;
-                    break;
-                }
-
-                Err(err) => panic!("[call_long_running_function] waitpid() failed: {}", err),
-            }
-            let took = time.elapsed();
-            if took > threshold {
-                match kill(child_pid, Signal::SIGKILL) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        if err != Errno::ESRCH {
-                            panic!(
-                                "[call_long_running_function] Error sending termination signal: {}",
-                                err
-                            );
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
-        return result;
     }
 }

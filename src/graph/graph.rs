@@ -1,29 +1,20 @@
-// use nix::NixPath;
-
-// use super::config;
 use super::config::GraphConfig;
 use super::fileio::create_file_from_string;
 use super::preprocess;
-use crate::description::{PackMeasuresDescription, TargetDescription};
+use crate::description::PackMeasuresDescription;
 use crate::errors::Result;
-// use crate::fileio::recreate_dir_all;
 
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
-// use std::str::FromStr;
-// use std::time::Duration;
-// use std::string::ParseError;
-// use std::vec;
 
-// const CSV_PATH: &str = "csv";
+const GPI_PATH: &str = "gpi";
+const CSV_PATH: &str = "csv";
 const DATA_PATH: &str = "data";
 const PREPROCESSED_DATA_PATH: &str = "preprocessed_data";
-const GRAPH_CONFIG_FILES_PATH: &str = "graph_config_files";
 const GRAPH_CONFIG_APPENDIX: &str = "graph.gpi";
-const TIME_RESULTS_CSV: &str = "total_time.csv";
 
 fn add_plot(
     mut gnuplot_str: String,
@@ -52,8 +43,9 @@ fn generate_pack_gpi<GenArgT>(
 where
     GenArgT: std::fmt::Display,
 {
-    let gnuplot_config = fs::read_to_string("measure_configs/gnuplot_config.gpi")?;
-    let mut gnuplot_str = gnuplot_config.clone();
+    // let gnuplot_config = fs::read_to_string("measure_configs/gnuplot_config.gpi")?;
+    let gnuplot_config = std::include_str!("gnuplot_config.gpi");
+    let mut gnuplot_str = gnuplot_config.to_string();
     gnuplot_str.push('\n');
     gnuplot_str.push_str("set term pdf\n");
     gnuplot_str.push_str(format!("set output \"{}_graph.pdf\"\n", config.pack_name).as_str());
@@ -164,13 +156,13 @@ where
         }
     }
     {
-        let preproc_path = PathBuf::from_str("csv")?;
+        let preproc_path = PathBuf::from_str(CSV_PATH)?;
         if !preproc_path.is_dir() {
             std::fs::create_dir(&preproc_path)?;
         }
     }
     {
-        let preproc_path = PathBuf::from_str("gpi")?;
+        let preproc_path = PathBuf::from_str(GPI_PATH)?;
         if !preproc_path.is_dir() {
             std::fs::create_dir(&preproc_path)?;
         }
@@ -186,11 +178,3 @@ where
     // clean(pack_name);
     Ok(())
 }
-
-// pub fn generate_graphics() -> Result<()> {
-//     let configs: Vec<GraphConfig> = config::read_configs(&PathBuf::from_str("data")?)?;
-//     for config in configs.iter() {
-//         generate_single_graphic(measure_pack)?;
-//     }
-//     Ok(())
-// }

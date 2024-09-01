@@ -41,7 +41,7 @@ where
                 return Err(e.into());
             }
         };
-        println!("path: {}", path.as_os_str().to_str().unwrap());
+        // println!("path: {}", path.as_os_str().to_str().unwrap());
         match fs::write(path, data) {
             Ok(()) => Ok(()),
             Err(e) => Err(e.into()),

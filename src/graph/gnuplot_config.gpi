@@ -1,0 +1,25 @@
+#!/usr/bin/gnuplot -persist
+reset
+
+# Encoding (affects labels and legend)
+set encoding utf8
+
+set term pdf
+
+# Enable grid
+set grid
+
+# Legend
+# set key at graph 0.1, 0.9
+set key on
+set key width 2 # For right offset
+set key ins vert
+set key reverse
+set key left top Left
+
+set key out vert center top
+
+# Lines/Dots
+set pointsize 1
+
+# Custom parameters go below
