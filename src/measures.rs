@@ -24,27 +24,11 @@ pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
     pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>>,
     current_data: Option<AlgArgT>,
     gen_arg: PhantomData<GenArgT>,
-    // gen_res: PhantomData<GenResT>,
     alg_arg: PhantomData<AlgArgT>,
     alg_res: PhantomData<AlgResT>,
 }
 
-// impl<'a, GenArgT, AlgArgT, AlgResT> FnOnce<()>
-//     for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-// {
-//     type Output = ();
-
-//     // Required method
-//     extern "rust-call" fn call_once(self, args: ()) -> Self::Output {
-//         ()
-//     }
-// }
-
-impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
-// where
-// GenResT: AsRef<AlgArgT>,
-// for<'b> &'b GenResT: AsRef<&'b AlgArgT>,
-{
+impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
     pub fn new(
         description: &str,
         algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
@@ -57,7 +41,6 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
             generator: RefCell::new(generator),
             current_data: None,
             gen_arg: PhantomData,
-            // gen_res: PhantomData,
             alg_arg: PhantomData,
             alg_res: PhantomData,
         }
@@ -75,7 +58,6 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
             generator: RefCell::new(generator),
             current_data: None,
             gen_arg: PhantomData,
-            // gen_res: PhantomData,
             alg_arg: PhantomData,
             alg_res: PhantomData,
         }
@@ -102,9 +84,6 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
             for _ in 0..iterations_amount {
                 data.push((generator.deref_mut())(size));
             }
-            // data.resize_with(iterations_amount as usize, move || {
-            //     (generator.deref_mut())(size)
-            // });
 
             let stopwatch: SystemTime = SystemTime::now();
             // let stopwatch = ProcessTime::now();
@@ -143,7 +122,6 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
 
 impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 where
-    // GenResT: AsRef<AlgArgT>,
     GenArgT: std::fmt::Display,
 {
     fn calculate_max_data_size(&self, sizes: &[GenArgT], threshold: Duration) -> usize {
@@ -267,7 +245,6 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
 
 impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
 where
-    // GenResT: AsRef<AlgArgT>,
     GenArgT: std::fmt::Display + Clone,
 {
     pub fn measure(&mut self, measures_amount: u64) {
