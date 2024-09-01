@@ -12,16 +12,33 @@ use std::time::SystemTime;
 
 const DATA_DIR: &str = "data";
 
+pub enum Algorithm<'a, AlgArgT, AlgResT> {
+    NonMutatingAlgorithm(Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>),
+    MutatingAlgorithm(Box<dyn Fn(&mut AlgArgT) -> AlgResT + 'a>),
+}
+
 pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
     pub filename: String,
     pub description: String,
-    pub algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
+    pub algorithm: Algorithm<'a, AlgArgT, AlgResT>,
     pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>>,
+    current_data: Option<AlgArgT>,
     gen_arg: PhantomData<GenArgT>,
     // gen_res: PhantomData<GenResT>,
     alg_arg: PhantomData<AlgArgT>,
     alg_res: PhantomData<AlgResT>,
 }
+
+// impl<'a, GenArgT, AlgArgT, AlgResT> FnOnce<()>
+//     for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
+// {
+//     type Output = ();
+
+//     // Required method
+//     extern "rust-call" fn call_once(self, args: ()) -> Self::Output {
+//         ()
+//     }
+// }
 
 impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
 // where
@@ -36,8 +53,27 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
         Self {
             description: description.to_string(),
             filename: description.to_string(),
-            algorithm,
+            algorithm: Algorithm::NonMutatingAlgorithm(algorithm),
             generator: RefCell::new(generator),
+            current_data: None,
+            gen_arg: PhantomData,
+            // gen_res: PhantomData,
+            alg_arg: PhantomData,
+            alg_res: PhantomData,
+        }
+    }
+
+    pub fn new_mut(
+        description: &str,
+        algorithm: Box<dyn Fn(&mut AlgArgT) -> AlgResT + 'a>,
+        generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>,
+    ) -> Self {
+        Self {
+            description: description.to_string(),
+            filename: description.to_string(),
+            algorithm: Algorithm::MutatingAlgorithm(algorithm),
+            generator: RefCell::new(generator),
+            current_data: None,
             gen_arg: PhantomData,
             // gen_res: PhantomData,
             alg_arg: PhantomData,
@@ -50,6 +86,10 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
         self
     }
 
+    pub fn set_current_data(&mut self, data: AlgArgT) {
+        self.current_data = Some(data);
+    }
+
     fn measure(&self, sizes: &[GenArgT], iterations_amount: u64) -> Vec<Duration> {
         let mut elapsed_time_for_sizes: Vec<Duration> = Vec::new();
 
@@ -58,14 +98,32 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
         for size in sizes.iter() {
             let mut current_elapsed_time = Duration::new(0, 0);
 
-            let data = (generator.deref_mut())(size);
+            let mut data = vec![];
+            for _ in 0..iterations_amount {
+                data.push((generator.deref_mut())(size));
+            }
+            // data.resize_with(iterations_amount as usize, move || {
+            //     (generator.deref_mut())(size)
+            // });
 
             let stopwatch: SystemTime = SystemTime::now();
             // let stopwatch = ProcessTime::now();
 
-            for _ in 0..iterations_amount {
-                (self.algorithm)(&data);
+            match &self.algorithm {
+                Algorithm::NonMutatingAlgorithm(algorithm) => {
+                    for _ in 0..iterations_amount as usize {
+                        let curr_data = data.pop().unwrap();
+                        (algorithm)(&curr_data);
+                    }
+                }
+                Algorithm::MutatingAlgorithm(algorithm) => {
+                    for _ in 0..iterations_amount as usize {
+                        let mut curr_data = data.pop().unwrap();
+                        (algorithm)(&mut curr_data);
+                    }
+                }
             }
+
             current_elapsed_time += stopwatch
                 .elapsed()
                 .expect("Ошибка определения wall-clock времени работы алгоритма");
@@ -101,7 +159,7 @@ where
                 let data = (generator.deref_mut())(size);
                 let res = nix_function_threshold::call_long_running_function(
                     &self.algorithm,
-                    &data,
+                    data,
                     threshold,
                 );
                 if res == false {
@@ -362,6 +420,7 @@ where
 }
 
 mod nix_function_threshold {
+    use super::Algorithm;
     use nix::errno::Errno;
     use nix::sys::signal::{kill, Signal};
     use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
@@ -369,16 +428,19 @@ mod nix_function_threshold {
     use std::process::exit;
     use std::time::Duration;
 
-    pub unsafe fn call_long_running_function<AlgArgT, ResT, F: Fn(&AlgArgT) -> ResT>(
-        function: &F,
-        data: &AlgArgT,
+    pub unsafe fn call_long_running_function<'a, AlgArgT, ResT>(
+        function: &Algorithm<'a, AlgArgT, ResT>,
+        mut data: AlgArgT,
         threshold: Duration,
     ) -> bool {
         let mut result = false;
 
         let child_pid = match fork() {
             Ok(ForkResult::Child) => {
-                _ = function(data);
+                match function {
+                    Algorithm::NonMutatingAlgorithm(function) => _ = function(&data),
+                    Algorithm::MutatingAlgorithm(function) => _ = function(&mut data),
+                }
                 exit(0);
             }
 
