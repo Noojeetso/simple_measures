@@ -1,10 +1,34 @@
-use crate::errors::Result;
-use std::fs;
+use anyhow::Result;
+use fs_err as fs;
+
+use std::fmt;
 use std::path::Path;
 
 #[derive(Debug, serde::Deserialize)]
+pub enum GraphOutputType {
+    NONE,
+    SVG,
+    PDF,
+    PNG,
+}
+
+impl fmt::Display for GraphOutputType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let output: &str;
+        match self {
+            Self::NONE => output = "",
+            Self::SVG => output = "svg",
+            Self::PDF => output = "pdf",
+            Self::PNG => output = "png",
+        }
+        write!(f, "{}", output)
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct GraphConfig {
-    pub pack_name: String,
+    pub output_type: GraphOutputType,
+    pub save_temp_files: bool,
     pub x_start: u32,
     pub x_end: u32,
     pub x_scale: f64,

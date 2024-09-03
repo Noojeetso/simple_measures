@@ -1,5 +1,7 @@
 use crate::description;
 
+use fs_err as fs;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -10,6 +12,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::time::SystemTime;
 
+const PACKS_DIR: &str = "packs";
 const DATA_DIR: &str = "data";
 
 pub enum Algorithm<'a, AlgArgT, AlgResT> {
@@ -316,9 +319,10 @@ where
 {
     pub fn write(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::Write;
-        let data_path = PathBuf::from_str(DATA_DIR)?;
+        let data_path =
+            PathBuf::from_str(format!("{}/{}/{}", PACKS_DIR, self.filename, DATA_DIR).as_str())?;
         if !data_path.is_dir() {
-            std::fs::create_dir_all(data_path)?;
+            fs::create_dir_all(data_path)?;
         }
         let mut descriptions = vec![];
         for (algorithm, statistic) in self.time_statistics.iter() {
@@ -339,20 +343,23 @@ where
             threshold: self.threshold,
             target_descriptions: descriptions,
         };
-        let pack_description_file_path =
-            PathBuf::from_str(format!("{}/{}/", DATA_DIR, self.filename).as_str())?;
+        let pack_description_dir_path =
+            PathBuf::from_str(format!("{}/{}/", PACKS_DIR, self.filename).as_str())?;
         // println!(
         //     "path: {}\n",
         //     pack_description_file_path.as_os_str().to_str().unwrap()
         // );
-        pack_description.write(&pack_description_file_path)?;
+        pack_description.write(&pack_description_dir_path)?;
         for (algorithm, statistic) in self.time_statistics.iter() {
-            let relative_path = format!("{}/{}/{}/", DATA_DIR, self.filename, algorithm.filename);
-            std::fs::create_dir_all(&relative_path)
+            let relative_path = format!(
+                "{}/{}/{}/{}/",
+                PACKS_DIR, self.filename, DATA_DIR, algorithm.filename
+            );
+            fs::create_dir_all(&relative_path)
                 .expect(format!("Не удалось создать каталог {}", relative_path).as_str());
             for i in 0..statistic.max_size_number {
                 let file_path = format!("{}{}.txt", relative_path, self.sizes[i]);
-                let mut file = std::fs::OpenOptions::new()
+                let mut file = fs::OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(&file_path)?;

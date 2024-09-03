@@ -1,20 +1,24 @@
 use super::config::GraphConfig;
 use super::fileio::create_file_from_string;
+use super::fileio::recreate_dir_all;
 use super::preprocess;
 use crate::description::PackMeasuresDescription;
-use crate::errors::Result;
 
-use std::fs;
-use std::path::Path;
+use anyhow::Result;
+use fs_err as fs;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 
-const GPI_PATH: &str = "gpi";
-const CSV_PATH: &str = "csv";
-const DATA_PATH: &str = "data";
-const PREPROCESSED_DATA_PATH: &str = "preprocessed_data";
-const GRAPH_CONFIG_APPENDIX: &str = "graph.gpi";
+const PACKS_DIR: &str = "packs";
+const DATA_DIR: &str = "data";
+const TEMP_DIR: &str = "graph_temp";
+const CSV_DIR: &str = "csv";
+const PREPROCESSED_DATA_DIR: &str = "preprocessed_data";
+const GRAPH_GPI_FILE: &str = "graph.gpi";
+const GRAPH_CONFIG_FILE: &str = "graph.conf";
+const PACK_DESCRIPTION_FILE: &str = "description.json";
 
 fn add_plot(
     mut gnuplot_str: String,
@@ -25,8 +29,8 @@ fn add_plot(
     description: &str,
 ) -> String {
     let data_path = format!(
-        "\"{}/{}/{}.txt\"",
-        PREPROCESSED_DATA_PATH, pack_name, filename
+        "\"{}/{}/{}/{}/{}.txt\"",
+        PACKS_DIR, pack_name, TEMP_DIR, PREPROCESSED_DATA_DIR, filename
     );
     let new_plot_str = format!(
         "\t{} using ($1*({})):($4*({})) with linespoints title \"{}\", \\\n",
@@ -43,12 +47,17 @@ fn generate_pack_gpi<GenArgT>(
 where
     GenArgT: std::fmt::Display,
 {
-    // let gnuplot_config = fs::read_to_string("measure_configs/gnuplot_config.gpi")?;
-    let gnuplot_config = std::include_str!("gnuplot_config.gpi");
+    let gnuplot_config = std::include_str!("gnuplot_base_config.gpi");
     let mut gnuplot_str = gnuplot_config.to_string();
     gnuplot_str.push('\n');
-    gnuplot_str.push_str("set term pdf\n");
-    gnuplot_str.push_str(format!("set output \"{}_graph.pdf\"\n", config.pack_name).as_str());
+    gnuplot_str.push_str(format!("set term {}\n", config.output_type).as_str());
+    gnuplot_str.push_str(
+        format!(
+            "set output \"{}/{}/{}_graph.{}\"\n",
+            PACKS_DIR, pack_description.filename, pack_description.filename, config.output_type
+        )
+        .as_str(),
+    );
     gnuplot_str.push('\n');
     gnuplot_str.push('\n');
     gnuplot_str.push_str("#Labels\n");
@@ -82,7 +91,7 @@ where
     for target_description in pack_description.target_descriptions.iter() {
         gnuplot_str = add_plot(
             gnuplot_str,
-            &config.pack_name.as_str(),
+            &pack_description.filename.as_str(),
             config.x_scale,
             config.y_scale,
             &target_description.filename,
@@ -99,82 +108,109 @@ where
     //     );
     // }
     create_file_from_string(
-        format!("{}_{}", config.pack_name, GRAPH_CONFIG_APPENDIX).as_str(),
+        format!(
+            "{}/{}/{}/{}",
+            PACKS_DIR, pack_description.filename, TEMP_DIR, GRAPH_GPI_FILE
+        )
+        .as_str(),
         &gnuplot_str,
     )?;
     Ok(())
 }
 
+fn create_graph_config<GenArgT>(pack_description: &PackMeasuresDescription<GenArgT>) -> Result<()>
+where
+    GenArgT: std::fmt::Display,
+{
+    let graph_config = std::include_str!("graph.conf").to_string();
+    create_file_from_string(
+        format!(
+            "{}/{}/{}",
+            PACKS_DIR, pack_description.filename, GRAPH_CONFIG_FILE
+        )
+        .as_str(),
+        &graph_config,
+    )?;
+    Ok(())
+}
+
 fn run_gnuplot(pack_name: &str) -> Result<()> {
-    let gnuplot_files = [format!("{}_{}", pack_name, GRAPH_CONFIG_APPENDIX)];
-    for file in gnuplot_files {
-        let mut process_handler = if cfg!(target_os = "windows") {
-            Command::new("gnuplot.exe")
-                .args([file.as_str(), "-persist"])
-                .spawn()?
-            // .expect("Не удалось запустить процесс")
-        } else {
-            Command::new("/usr/bin/gnuplot")
-                .args([file.as_str(), "-persist"])
-                .spawn()?
-            // .expect(format!("Не удалось запустить процесс {}", "/usr/bin/gnuplot").as_str())
-        };
-        _ = process_handler.wait();
+    let gnuplot_file = format!(
+        "{}/{}/{}/{}",
+        PACKS_DIR, pack_name, TEMP_DIR, GRAPH_GPI_FILE
+    );
+    let mut process_handler = if cfg!(target_os = "windows") {
+        Command::new("gnuplot.exe")
+            .args([gnuplot_file.as_str(), "-persist"])
+            .spawn()?
+        // .expect("Не удалось запустить процесс")
+    } else {
+        Command::new("gnuplot")
+            .args([gnuplot_file.as_str(), "-persist"])
+            .spawn()?
+        // .expect(format!("Не удалось запустить процесс {}", "/usr/bin/gnuplot").as_str())
+    };
+    _ = process_handler.wait();
+    Ok(())
+}
+
+fn create_temp(pack_name: &str) -> Result<()> {
+    let temp_path =
+        PathBuf::from_str(format!("{}/{}/{}", PACKS_DIR, pack_name, TEMP_DIR).as_str())?;
+    recreate_dir_all(&temp_path)?;
+    Ok(())
+}
+
+fn clean_temp(pack_name: &str) -> Result<()> {
+    let graph_temp_data_dir =
+        PathBuf::from_str(format!("{}/{}/{}/", PACKS_DIR, pack_name, TEMP_DIR).as_str())?;
+    if graph_temp_data_dir.is_dir() {
+        fs::remove_dir_all(graph_temp_data_dir)?;
     }
     Ok(())
 }
 
-fn clean(pack_name: &str) -> Result<()> {
-    use std::path::Path;
-    let preprocessed_data_path = Path::new(PREPROCESSED_DATA_PATH);
-    if preprocessed_data_path.is_dir() {
-        std::fs::remove_dir_all(preprocessed_data_path)?;
-    }
-    let custom_graph_gpi_name = format!("{}_{}", pack_name, GRAPH_CONFIG_APPENDIX);
-
-    let custom_graph_gpi = Path::new(custom_graph_gpi_name.as_str());
-    if custom_graph_gpi.is_file() {
-        std::fs::remove_file(custom_graph_gpi)?;
-    }
-    Ok(())
-}
-
-pub fn generate_single_graphic<GenArgT>(pack_name: &str, config_path: &Path) -> Result<()>
+pub fn generate_single_graphic<GenArgT>(pack_name: &str) -> Result<()>
 where
     GenArgT: std::fmt::Display + serde::de::DeserializeOwned,
 {
-    let pack_name = pack_name;
-
-    let graph_config = GraphConfig::read(config_path)?;
-    let pack_descsription_path =
-        PathBuf::from_str(format!("{}/{}/description.json", DATA_PATH, pack_name).as_str())?;
+    let pack_descsription_path = PathBuf::from_str(
+        format!("{}/{}/{}", PACKS_DIR, pack_name, PACK_DESCRIPTION_FILE).as_str(),
+    )?;
     let pack_description = PackMeasuresDescription::<GenArgT>::read(&pack_descsription_path)?;
-    {
-        let preproc_path = PathBuf::from_str("data_preproc")?;
-        if !preproc_path.is_dir() {
-            std::fs::create_dir(&preproc_path)?;
-        }
+
+    let graph_config_path =
+        PathBuf::from_str(format!("{}/{}/{}", PACKS_DIR, pack_name, GRAPH_CONFIG_FILE).as_str())?;
+    if !graph_config_path.exists() {
+        create_graph_config(&pack_description)?;
     }
-    {
-        let preproc_path = PathBuf::from_str(CSV_PATH)?;
-        if !preproc_path.is_dir() {
-            std::fs::create_dir(&preproc_path)?;
-        }
-    }
-    {
-        let preproc_path = PathBuf::from_str(GPI_PATH)?;
-        if !preproc_path.is_dir() {
-            std::fs::create_dir(&preproc_path)?;
-        }
-    }
-    preprocess::prepare_data(pack_name)?;
+    let graph_config = GraphConfig::read(&graph_config_path)?;
+
+    create_temp(pack_name)?;
+    let data_path =
+        PathBuf::from_str(format!("{}/{}/{}", PACKS_DIR, pack_name, DATA_DIR).as_str())?;
+    let preprocessed_data_path = PathBuf::from_str(
+        format!(
+            "{}/{}/{}/{}",
+            PACKS_DIR, pack_name, TEMP_DIR, PREPROCESSED_DATA_DIR
+        )
+        .as_str(),
+    )?;
+    let csv_path = PathBuf::from_str(
+        format!("{}/{}/{}/{}", PACKS_DIR, pack_name, TEMP_DIR, CSV_DIR).as_str(),
+    )?;
+    preprocess::prepare_data(&data_path, &preprocessed_data_path, &csv_path)?;
     preprocess::create_time_total_csv(
-        pack_name,
+        &data_path,
+        &csv_path,
         &pack_description.sizes,
         &pack_description.threshold,
     )?;
     generate_pack_gpi(&pack_description, &graph_config)?;
     run_gnuplot(pack_name)?;
-    // clean(pack_name);
+    if !graph_config.save_temp_files {
+        clean_temp(pack_name)?;
+    }
+
     Ok(())
 }

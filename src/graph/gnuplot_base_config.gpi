@@ -4,8 +4,6 @@ reset
 # Encoding (affects labels and legend)
 set encoding utf8
 
-set term pdf
-
 # Enable grid
 set grid
 

@@ -1,12 +1,13 @@
+use anyhow::Result;
+use fs_err as fs;
+use num::Integer;
+use serde::ser::StdError;
+
 use csv::ReaderBuilder;
 use std::error;
 use std::fmt;
-use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::path::Path;
-
-pub type IOResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
 #[derive(Debug, Clone)]
 pub struct ParseError;
@@ -29,10 +30,7 @@ impl std::fmt::Display for NonPositiveError {
 
 impl error::Error for NonPositiveError {}
 
-use num::Integer;
-use serde::ser::StdError;
-
-pub fn get_filename(path: &Path) -> IOResult<&str> {
+pub fn get_filename(path: &Path) -> Result<&str> {
     let file_name = match path.file_name() {
         Some(os_string) => match os_string.to_str() {
             Some(name) => name,
@@ -43,7 +41,7 @@ pub fn get_filename(path: &Path) -> IOResult<&str> {
     Ok(file_name)
 }
 
-pub fn scan_nonnegative_number<T: Integer + std::str::FromStr>() -> IOResult<T>
+pub fn scan_nonnegative_number<T: Integer + std::str::FromStr>() -> Result<T>
 where
     <T as std::str::FromStr>::Err: StdError,
 {
@@ -68,7 +66,7 @@ where
     Ok(res)
 }
 
-pub fn scan_nonnegative_number_prompt<T: Integer + std::str::FromStr>(prompt: &str) -> IOResult<T>
+pub fn scan_nonnegative_number_prompt<T: Integer + std::str::FromStr>(prompt: &str) -> Result<T>
 where
     <T as std::str::FromStr>::Err: StdError,
 {
@@ -99,8 +97,8 @@ pub fn read_prompt(prompt: &str) -> String {
     line
 }
 
-pub fn create_file_from_string(name: &str, data: &String) -> IOResult<()> {
-    let mut file_out = OpenOptions::new()
+pub fn create_file_from_string(name: &str, data: &String) -> Result<()> {
+    let mut file_out = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
@@ -115,11 +113,11 @@ pub fn create_file_from_string(name: &str, data: &String) -> IOResult<()> {
 }
 
 pub fn read_csv_file(
-    file_path: &str,
+    file_path: &Path,
     has_header: bool,
     start_column_index: usize,
-) -> IOResult<(Vec<String>, Vec<Vec<String>>)> {
-    let file = File::open(file_path)?;
+) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+    let file = fs::File::open(file_path)?;
     let mut csv_reader = ReaderBuilder::new()
         .has_headers(has_header)
         .from_reader(file);
@@ -149,19 +147,19 @@ pub fn read_csv_file(
     Ok((headers, rows))
 }
 
-pub fn recreate_dir_all(path: &std::path::Path) -> IOResult<()> {
+pub fn recreate_dir_all(path: &std::path::Path) -> Result<()> {
     if path.exists() {
-        if !path.is_dir() {
-            std::fs::remove_file(path)?;
-        } else {
-            std::fs::remove_dir_all(path)?;
-        }
+        // if !path.is_dir() {
+        //     fs::remove_file(path)?;
+        // } else {
+        fs::remove_dir_all(path)?;
+        // }
     }
-    std::fs::create_dir_all(path)?;
+    fs::create_dir_all(path)?;
     Ok(())
 }
 
-pub fn input_vector() -> IOResult<Vec<i32>> {
+pub fn input_vector() -> Result<Vec<i32>> {
     let mut line: String = read_line();
     line = line.trim().to_string();
     let parts = line.split(" ").collect::<Vec<&str>>();

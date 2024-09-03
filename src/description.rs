@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
 
+use anyhow::Result;
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TargetDescription {
     pub filename: String,
@@ -29,7 +31,7 @@ impl<GenArgT> PackMeasuresDescription<GenArgT>
 where
     GenArgT: std::fmt::Display + serde::ser::Serialize,
 {
-    pub fn write(&self, dir_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn write(&self, dir_path: &Path) -> Result<()> {
         if !dir_path.is_dir() {
             std::fs::create_dir_all(dir_path)?;
         }
@@ -53,7 +55,7 @@ impl<GenArgT> PackMeasuresDescription<GenArgT>
 where
     GenArgT: std::fmt::Display + serde::de::DeserializeOwned,
 {
-    pub fn read(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn read(path: &Path) -> Result<Self> {
         let data = match fs::read_to_string(path) {
             Ok(data) => data,
             Err(e) => {

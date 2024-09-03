@@ -1,11 +1,13 @@
 simple_measures
 =====
 Крейт для простых измерений времени работы алгоритмов.  
-Работает только на *nix системах.
+Работает только на *nix системах.  
+Также необходимо установить gnuplot.  
+Тип аргумента функции должен быть ссылкой (мутабельной, если необходимо) на тип, возвращаемый генератором. Если алгоритм принимает более одного аргумента, то для использования можно написать замыкание-обёртку, принимающее ссылку на tuple struct. 
 
 ### Использование
 
-algorithms.rs
+`algorithms.rs`
 ```rs
 pub fn linear_algorithm(data: &mut Vec<f64>) -> f64 {
     let mut res = 0.0;
@@ -28,8 +30,9 @@ pub fn quadratic_algorithm(data: &Vec<f64>) -> f64 {
     return sum + sum2;
 }
 ```
+<br />
 
-generators.rs
+`generators.rs`
 ```rs
 use rand::prelude::*;
 use rand::Rng;
@@ -63,8 +66,9 @@ impl VectorGenerator {
     }
 }
 ```
+<br />
 
-main.rs
+`main.rs`:
 ```rs
 mod algorithms;
 mod generators;
@@ -111,33 +115,33 @@ fn main() {
             sizes)
         .with_filename("default_pack")  // Название каталога, в который будут записаны файлы с результатами измерений, а также файл-описаниею. По умолчанию название совпадает с именем набора
         .with_threshold(Duration::new(1, 0))  // Ограничение на время выполнения алгоритмов. Максимальные размеры вычисляются единожды перед запуском первого измерения (при последующих запусках измерений размеры вычисляться не будут, но можно вручную вызвать соответствующую функцию)
-        .with_iterations_amount(5)
+        .with_iterations_amount(5)  // Количество итераций работы алгоритма во время одного замера, в качестве результата замера берётся среднее значение времени работы
+        // Подписи в таблице и на графике
         .with_x_label("Линейный размер данных")
         .with_y_label("Времени работы алгоритмов, мкс");
-    pack_measures.add_target(measurable_linear_algorithm);
+    pack_measures.add_target(measurable_linear_algorithm);  // Вставка измеряемых функций в набор 
     pack_measures.add_target(measurable_quadratic_algorithm);
     pack_measures.use_threshold(true);  // Возможность отключить вычисление максимальных размеров перед измерениями. По умолчанию включено
-    pack_measures.measure(5);  // Количество итераций работы алгоритма во время одного замера, в качестве результата замера берётся среднее значение времени работы
+    pack_measures.measure(5);  // Замер алгоритмов N раз подряд
     pack_measures.write().unwrap();  // Запись результатов измерений на диск
     pack_measures.print();  // Вывод результатов измерений в виде таблицы в стандартный поток вывода
 
-    // Построение графика
-    match simple_measures::graph::graph::generate_single_graphic::<usize>(
-        "default_pack",  // Имя каталога с результатами работы набора алгоритмов
-        &PathBuf::from_str("default.conf").unwrap(),  // Путь к файлу с конфигурацией графика
-    ) {
-        Ok(()) => (),
-        Err(e) => {
-            eprint!("{:#}\n", e);
-        }
-    };
+    // Генерация графика
+    simple_measures::graph::graph::generate_single_graphic::<usize>(
+        "default_pack", // Имя каталога с результатами работы набора алгоритмов
+    )
 }
 ```
 
-Файл конфигурации графика default.conf
+`graph.conf`
+---
+
+Файл конфигурации графика `graph.conf`, создающийся по умолчанию в `packs/{pack-name}/` при вызове функции генерации графика:
+
 ```json
 {
-    "pack_name": "default_pack",
+    "output_type": "SVG",
+    "save_temp_files": false,
     "x_start" : 0,
     "x_end" : 0,
     "x_scale" : 1,
@@ -147,8 +151,15 @@ fn main() {
     "y_scale" : 1,
     "log_y" : false
 }
-
 ```
+`output_type` может быть одним из:
+- `PDF`
+- `SVG`
+- `PNG`.
 
-График, полученный в результате измерений:  
-![graph](./default_pack_graph.pdf)
+`x_start`, `x_end` и т.д. ограничивают область графика. Если `x_start == x_end == 0`, то ограничений нет.
+
+График, полученный в результате измерений
+---
+
+![graph](./default_pack_graph.svg)

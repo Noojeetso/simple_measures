@@ -1,29 +1,25 @@
 use super::fileio::{get_filename, read_csv_file, recreate_dir_all};
 use super::quartiles::Quartiles;
-use crate::errors::{GraphError, GraphErrorRepr, Result};
+use crate::errors::{GraphError, GraphErrorRepr};
 
-use std::fs::File;
+use anyhow::{Context, Result};
+use fs_err as fs;
+
 use std::io::{prelude::*, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 
-const CSV_PATH: &str = "csv";
-const DATA_PATH: &str = "data";
-const PREPROCESSED_DATA_PATH: &str = "preprocessed_data";
 const TIME_RESULTS_CSV: &str = "total_time.csv";
 
-pub fn prepare_data(pack_name: &str) -> Result<()> {
-    let pack_data_dir = std::fs::read_dir(format!("{}/{}", DATA_PATH, pack_name))?;
-
-    {
-        let preprocessed_data_path_name = format!("{}/{}", PREPROCESSED_DATA_PATH, pack_name);
-        recreate_dir_all(Path::new(preprocessed_data_path_name.as_str()))?;
-    }
-
-    {
-        let preprocessed_csv_path_name = format!("{}/{}", CSV_PATH, pack_name);
-        recreate_dir_all(Path::new(preprocessed_csv_path_name.as_str()))?;
-    }
+pub fn prepare_data(
+    data_path: &Path,
+    preprocessed_data_path: &Path,
+    csv_path: &Path,
+) -> Result<()> {
+    let pack_data_dir = fs::read_dir(data_path)?;
+    recreate_dir_all(preprocessed_data_path)?;
+    recreate_dir_all(csv_path)?;
 
     for pack_data_dir_entry in pack_data_dir {
         let pack_data_dir_entry_path = pack_data_dir_entry?.path();
@@ -42,7 +38,10 @@ pub fn prepare_data(pack_name: &str) -> Result<()> {
                 }
             },
             None => {
-                eprintln!("Путь должен быть задан в utf-8 формате");
+                eprintln!(
+                    "{}: Путь должен быть задан в utf-8 формате",
+                    pack_data_dir_entry_path.display()
+                );
                 return Err(GraphError {
                     repr: GraphErrorRepr::DataPreprocessingError,
                 }
@@ -50,25 +49,16 @@ pub fn prepare_data(pack_name: &str) -> Result<()> {
             }
         };
 
-        let size_paths = std::fs::read_dir(&pack_data_dir_entry_path).expect(
-            format!(
-                "Ошибка чтения каталога {}",
-                &pack_data_dir_entry_path.display()
-            )
-            .as_str(),
-        );
+        let size_paths = fs::read_dir(&pack_data_dir_entry_path)?;
 
         let mut int_lines: Vec<Vec<i32>> = Vec::new();
 
         for size_path_result in size_paths {
-            let size_path = size_path_result.expect("Ошибка чтения пути файла").path();
+            let size_path = size_path_result?.path();
             let filename = size_path.file_name().unwrap();
             let basename = filename.to_str().unwrap().split(".").next().unwrap();
 
-            let file = match File::open(&size_path) {
-                Err(e) => panic!("Не удалось открыть файл {}: {}", &size_path.display(), e),
-                Ok(file) => file,
-            };
+            let file = fs::File::open(&size_path)?;
 
             let reader = BufReader::new(file);
             let mut res_vec = reader
@@ -106,18 +96,17 @@ pub fn prepare_data(pack_name: &str) -> Result<()> {
                 .collect::<Vec<String>>()
                 .join("\n");
 
-            let algorithm_full_stat_path =
-                format!("{}/{}/{}.txt", PREPROCESSED_DATA_PATH, pack_name, algo_name);
+            let algorithm_full_stat_path = preprocessed_data_path
+                .join(PathBuf::from_str(format!("{}.txt", algo_name).as_str())?);
 
-            let mut file = File::create(&algorithm_full_stat_path)
-                .expect(format!("Не удалось открыть файл {}", &algorithm_full_stat_path).as_str());
+            let mut file = fs::File::create(&algorithm_full_stat_path)?;
 
             file.write_all(full_stats.as_bytes()).unwrap();
         }
 
         {
             let algorithm_simple_stat_path =
-                format!("{}/{}/{}.csv", CSV_PATH, pack_name, algo_name);
+                csv_path.join(PathBuf::from_str(format!("{}.csv", algo_name).as_str())?);
 
             let simple_stats = int_lines
                 .iter()
@@ -125,9 +114,7 @@ pub fn prepare_data(pack_name: &str) -> Result<()> {
                 .collect::<Vec<String>>()
                 .join("\n");
 
-            let mut file = File::create(&algorithm_simple_stat_path).expect(
-                format!("Не удалось открыть файл {}", &algorithm_simple_stat_path).as_str(),
-            );
+            let mut file = fs::File::create(&algorithm_simple_stat_path)?;
 
             file.write_all(simple_stats.as_bytes()).unwrap();
         }
@@ -137,7 +124,8 @@ pub fn prepare_data(pack_name: &str) -> Result<()> {
 }
 
 pub fn create_time_total_csv<GenArgT>(
-    pack_name: &str,
+    data_path: &Path,
+    csv_path: &Path,
     sizes: &[GenArgT],
     threshold: &Duration,
 ) -> Result<()>
@@ -164,7 +152,7 @@ where
     }
 
     let mut file_names: Vec<String> = Vec::new();
-    let pack_data_dir = std::fs::read_dir(format!("{}/{}", DATA_PATH, pack_name))?;
+    let pack_data_dir = fs::read_dir(data_path)?;
     for pack_data_dir_entry in pack_data_dir {
         let pack_data_dir_entry_path = pack_data_dir_entry?.path();
         match pack_data_dir_entry_path.extension() {
@@ -192,11 +180,11 @@ where
     }
 
     for i in 0..file_names.len() {
-        let file_path = format!("{}/{}/{}", CSV_PATH, pack_name, file_names[i]);
+        let file_path = csv_path.join(PathBuf::from_str(&file_names[i])?);
         // eprintln!("[create_time_total_csv]: filename: {}", file_path);
 
         let (_header, rows) = read_csv_file(&file_path, false, 1)
-            .expect(format!("Не удалось прочесть файл: {}", file_path).as_str());
+            .with_context(|| format!("Failed to read instrs from {}", file_path.display()))?;
         for i in 0..rows.len() {
             let row = &rows[i];
 
@@ -216,9 +204,9 @@ where
     }
 
     let merged_string = merged_rows.join("\n");
-    let merged_csv_path = format!("{}/{}/{}", CSV_PATH, pack_name, TIME_RESULTS_CSV);
-    let mut file = File::create(&merged_csv_path)
-        .expect(format!("Не удалось создать новый файл {}", &merged_csv_path).as_str());
+
+    let merged_csv_path = csv_path.join(PathBuf::from_str(TIME_RESULTS_CSV)?);
+    let mut file = fs::File::create(&merged_csv_path)?;
 
     file.write_all(merged_string.as_bytes()).unwrap();
 
