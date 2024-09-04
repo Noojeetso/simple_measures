@@ -1,5 +1,6 @@
 use crate::description;
 
+use cpu_time::{ProcessTime, ThreadTime};
 use fs_err as fs;
 
 use std::cell::RefCell;
@@ -9,11 +10,49 @@ use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
 use std::time::SystemTime;
+use std::time::Duration;
 
 const PACKS_DIR: &str = "packs";
 const DATA_DIR: &str = "data";
+
+pub enum TimerType {
+    ProcessTimer,
+    ThreadTimer,
+    SystemTimer,
+}
+
+pub trait Timer {
+    fn now() -> Self;
+    fn elapsed(&self) -> Duration;
+}
+
+impl Timer for ProcessTime {
+    fn now() -> Self {
+        Self::now()
+    }
+    fn elapsed(&self) -> Duration {
+        self.elapsed()
+    }
+}
+
+impl Timer for ThreadTime {
+    fn now() -> Self {
+        Self::now()
+    }
+    fn elapsed(&self) -> Duration {
+        self.elapsed()
+    }
+}
+
+impl Timer for SystemTime {
+    fn now() -> Self {
+        Self::now()
+    }
+    fn elapsed(&self) -> Duration {
+        self.elapsed().unwrap()
+    }
+}
 
 pub enum Algorithm<'a, AlgArgT, AlgResT> {
     NonMutatingAlgorithm(Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>),
@@ -75,7 +114,10 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
         self.current_data = Some(data);
     }
 
-    fn measure(&self, sizes: &[GenArgT], iterations_amount: u64) -> Vec<Duration> {
+    fn measure<TimerT>(&self, sizes: &[GenArgT], iterations_amount: u64) -> Vec<Duration>
+    where
+        TimerT: Timer
+        {
         let mut elapsed_time_for_sizes: Vec<Duration> = Vec::new();
 
         let mut generator = self.generator.borrow_mut();
@@ -88,8 +130,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
                 data.push((generator.deref_mut())(size));
             }
 
-            let stopwatch: SystemTime = SystemTime::now();
-            // let stopwatch = ProcessTime::now();
+            let stopwatch = TimerT::now();
 
             match &self.algorithm {
                 Algorithm::NonMutatingAlgorithm(algorithm) => {
@@ -106,12 +147,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
                 }
             }
 
-            current_elapsed_time += stopwatch
-                .elapsed()
-                .expect("Ошибка определения wall-clock времени работы алгоритма");
-            // current_duration += stopwatch
-            //     .try_elapsed()
-            //     .expect("Ошибка определения процессорного времени в конце работы");
+            current_elapsed_time += stopwatch.elapsed();
 
             current_elapsed_time = current_elapsed_time
                 .checked_div(iterations_amount as u32)
@@ -185,6 +221,7 @@ pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
     description: String,
     filename: String,
     sizes: Vec<GenArgT>,
+    timer: TimerType,
     x_label: String,
     y_label: String,
     iterations_amount: u64,
@@ -201,6 +238,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
             description: name.to_string(),
             filename: name.to_string(),
             sizes,
+            timer: TimerType::ProcessTimer,
             x_label: String::from_str("Аргументы функций").unwrap(),
             y_label: String::from_str("Значения функций").unwrap(),
             iterations_amount: 5,
@@ -213,6 +251,11 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
 
     pub fn with_filename(mut self, filename: &str) -> Self {
         self.filename = filename.to_string();
+        self
+    }
+
+    pub fn with_timer(mut self, timer: TimerType) -> Self {
+        self.timer = timer;
         self
     }
 
@@ -276,10 +319,21 @@ where
             for i in 0..measures_amount {
                 write!(lock, "Номер замера: {}/{}\t\r", i + 1, measures_amount).unwrap();
                 _ = std::io::stdout().flush();
-                let elapsed_time_for_sizes = algorithm.measure(
-                    &self.sizes[0..statistic.max_size_number],
-                    self.iterations_amount,
-                );
+                let measure_sizes = &self.sizes[0..statistic.max_size_number];
+                let elapsed_time_for_sizes = match &self.timer {
+                    TimerType::ProcessTimer => algorithm.measure::<ProcessTime>(
+                        measure_sizes,
+                        self.iterations_amount
+                    ),
+                    TimerType::ThreadTimer => algorithm.measure::<ThreadTime>(
+                        measure_sizes,
+                        self.iterations_amount
+                    ),
+                    TimerType::SystemTimer => algorithm.measure::<SystemTime>(
+                        measure_sizes,
+                        self.iterations_amount
+                    ),
+                };
                 for (i, time_elapsed) in elapsed_time_for_sizes.into_iter().enumerate() {
                     statistic.measures[i].push(time_elapsed);
                 }
