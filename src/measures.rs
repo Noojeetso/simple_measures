@@ -10,8 +10,8 @@ use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::SystemTime;
 use std::time::Duration;
+use std::time::SystemTime;
 
 const PACKS_DIR: &str = "packs";
 const DATA_DIR: &str = "data";
@@ -59,22 +59,28 @@ pub enum Algorithm<'a, AlgArgT, AlgResT> {
     MutatingAlgorithm(Box<dyn Fn(&mut AlgArgT) -> AlgResT + 'a>),
 }
 
-pub struct MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
+pub struct MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
+where
+    'b: 'a,
+{
     pub filename: String,
     pub description: String,
     pub algorithm: Algorithm<'a, AlgArgT, AlgResT>,
-    pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>>,
+    pub generator: RefCell<Box<dyn FnMut(&GenArgT) -> AlgArgT + 'b>>,
     current_data: Option<AlgArgT>,
     gen_arg: PhantomData<GenArgT>,
     alg_arg: PhantomData<AlgArgT>,
     alg_res: PhantomData<AlgResT>,
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
+impl<'a, 'b, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
+where
+    'b: 'a,
+{
     pub fn new(
         description: &str,
         algorithm: Box<dyn Fn(&AlgArgT) -> AlgResT + 'a>,
-        generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>,
+        generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'b>,
     ) -> Self {
         Self {
             description: description.to_string(),
@@ -91,7 +97,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
     pub fn new_mut(
         description: &str,
         algorithm: Box<dyn Fn(&mut AlgArgT) -> AlgResT + 'a>,
-        generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'a>,
+        generator: Box<dyn FnMut(&GenArgT) -> AlgArgT + 'b>,
     ) -> Self {
         Self {
             description: description.to_string(),
@@ -116,8 +122,8 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
 
     fn measure<TimerT>(&self, sizes: &[GenArgT], iterations_amount: u64) -> Vec<Duration>
     where
-        TimerT: Timer
-        {
+        TimerT: Timer,
+    {
         let mut elapsed_time_for_sizes: Vec<Duration> = Vec::new();
 
         let mut generator = self.generator.borrow_mut();
@@ -159,7 +165,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, Al
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
+impl<'a, 'b, GenArgT, AlgArgT, AlgResT> MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
 where
     GenArgT: std::fmt::Display,
 {
@@ -196,17 +202,22 @@ where
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PartialEq
-    for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>
+impl<'a, 'b, GenArgT, AlgArgT, AlgResT> PartialEq
+    for MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
 {
     fn eq(&self, other: &Self) -> bool {
         self.filename == other.filename
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> Eq for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {}
+impl<'a, 'b, GenArgT, AlgArgT, AlgResT> Eq
+    for MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
+{
+}
 
-impl<'a, GenArgT, AlgArgT, AlgResT> Hash for MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT> {
+impl<'a, 'b, GenArgT, AlgArgT, AlgResT> Hash
+    for MeasurableAlgorithm<'a, 'b, GenArgT, AlgArgT, AlgResT>
+{
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.filename.hash(state);
     }
@@ -217,10 +228,14 @@ pub struct AlgorithmTimeStatistic {
     pub measures: Vec<Vec<Duration>>,
 }
 
-pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
+pub struct PackMeasures<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT>
+where
+    'b: 'a,
+    'c: 'a,
+{
     description: String,
     filename: String,
-    sizes: Vec<GenArgT>,
+    sizes: &'b Vec<GenArgT>,
     timer: TimerType,
     x_label: String,
     y_label: String,
@@ -228,12 +243,12 @@ pub struct PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
     use_threshold: bool,
     threshold: Duration,
     time_statistics:
-        HashMap<MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>, AlgorithmTimeStatistic>,
+        HashMap<&'a MeasurableAlgorithm<'a, 'c, GenArgT, AlgArgT, AlgResT>, AlgorithmTimeStatistic>,
     need_max_sizes_update: bool,
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> {
-    pub fn new(name: &str, sizes: Vec<GenArgT>) -> Self {
+impl<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT> {
+    pub fn new(name: &str, sizes: &'b Vec<GenArgT>) -> Self {
         PackMeasures {
             description: name.to_string(),
             filename: name.to_string(),
@@ -289,7 +304,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
 
     pub fn add_target(
         &mut self,
-        measurable_algorithm: MeasurableAlgorithm<'a, GenArgT, AlgArgT, AlgResT>,
+        measurable_algorithm: &'a MeasurableAlgorithm<'a, 'c, GenArgT, AlgArgT, AlgResT>,
     ) {
         self.time_statistics.insert(
             measurable_algorithm,
@@ -301,7 +316,7 @@ impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT> 
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
+impl<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT>
 where
     GenArgT: std::fmt::Display + Clone,
 {
@@ -321,18 +336,15 @@ where
                 _ = std::io::stdout().flush();
                 let measure_sizes = &self.sizes[0..statistic.max_size_number];
                 let elapsed_time_for_sizes = match &self.timer {
-                    TimerType::ProcessTimer => algorithm.measure::<ProcessTime>(
-                        measure_sizes,
-                        self.iterations_amount
-                    ),
-                    TimerType::ThreadTimer => algorithm.measure::<ThreadTime>(
-                        measure_sizes,
-                        self.iterations_amount
-                    ),
-                    TimerType::SystemTimer => algorithm.measure::<SystemTime>(
-                        measure_sizes,
-                        self.iterations_amount
-                    ),
+                    TimerType::ProcessTimer => {
+                        algorithm.measure::<ProcessTime>(measure_sizes, self.iterations_amount)
+                    }
+                    TimerType::ThreadTimer => {
+                        algorithm.measure::<ThreadTime>(measure_sizes, self.iterations_amount)
+                    }
+                    TimerType::SystemTimer => {
+                        algorithm.measure::<SystemTime>(measure_sizes, self.iterations_amount)
+                    }
                 };
                 for (i, time_elapsed) in elapsed_time_for_sizes.into_iter().enumerate() {
                     statistic.measures[i].push(time_elapsed);
@@ -367,7 +379,7 @@ where
     }
 }
 
-impl<'a, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, GenArgT, AlgArgT, AlgResT>
+impl<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT>
 where
     GenArgT: std::fmt::Display + Clone + serde::ser::Serialize,
 {
