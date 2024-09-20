@@ -200,8 +200,11 @@ where
         format!("{}/{}/{}/{}", PACKS_DIR, pack_name, TEMP_DIR, CSV_DIR).as_str(),
     )?;
     preprocess::prepare_data(&data_path, &preprocessed_data_path, &csv_path)?;
+    let time_total_dir = PathBuf::from_str(
+        format!("{}/{}/", PACKS_DIR, pack_name).as_str(),
+    )?;
     preprocess::create_time_total_csv(
-        &data_path,
+        &time_total_dir,
         &csv_path,
         &pack_description.sizes,
         &pack_description.threshold,

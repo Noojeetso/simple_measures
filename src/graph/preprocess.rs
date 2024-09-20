@@ -33,8 +33,7 @@ pub fn prepare_data(
                 None => {
                     return Err(GraphError {
                         repr: GraphErrorRepr::DataPreprocessingError,
-                    }
-                    .into());
+                    }.into());
                 }
             },
             None => {
@@ -44,8 +43,7 @@ pub fn prepare_data(
                 );
                 return Err(GraphError {
                     repr: GraphErrorRepr::DataPreprocessingError,
-                }
-                .into());
+                }.into());
             }
         };
 
@@ -124,7 +122,7 @@ pub fn prepare_data(
 }
 
 pub fn create_time_total_csv<GenArgT>(
-    data_path: &Path,
+    time_total_dir: &Path,
     csv_path: &Path,
     sizes: &[GenArgT],
     threshold: &Duration,
@@ -132,6 +130,7 @@ pub fn create_time_total_csv<GenArgT>(
 where
     GenArgT: std::fmt::Display,
 {
+    use std::cmp::Ordering;
     fn separate_row_value(row_value_str: &str) -> String {
         static DIGITS_IN_GROUP: usize = 3;
         let mut out_str = String::new();
@@ -151,27 +150,64 @@ where
         out_str
     }
 
-    let mut file_names: Vec<String> = Vec::new();
-    let pack_data_dir = fs::read_dir(data_path)?;
-    for pack_data_dir_entry in pack_data_dir {
-        let pack_data_dir_entry_path = pack_data_dir_entry?.path();
-        match pack_data_dir_entry_path.extension() {
-            Some(ext) => {
-                if ext == "json" {
-                    continue;
-                }
+    let mut file_names_with_peak_time: Vec<(String, (usize, usize))> = Vec::new();
+    let pack_csv_dir = fs::read_dir(csv_path)?;
+    for pack_data_dir_entry in pack_csv_dir {
+        let pack_csv_dir_entry_path = pack_data_dir_entry?.path();
+        if let Some(ext) = pack_csv_dir_entry_path.extension() {
+            if ext == "json" {
+                continue;
             }
-            None => (),
         }
-        let algorithm_name: &str = get_filename(&pack_data_dir_entry_path)?;
-        file_names.push(format!("{}.csv", algorithm_name));
+
+        let algorithm_name: &str = get_filename(&pack_csv_dir_entry_path)?;
+
+        let file = fs::File::open(&pack_csv_dir_entry_path)?;
+        let reader = BufReader::new(file);
+        let peak_time_measure = reader
+            .lines()
+            .scan((), |_, x| x.ok())
+            .map(|x| {let mut split = x.split(' ');
+                              (split.next().unwrap().parse::<i32>().unwrap(),
+                               split.next().unwrap().parse::<i32>().unwrap())})
+            .max_by(|a,b|
+                match a.0.cmp(&b.0) {
+                    Ordering::Equal => a.1.cmp(&b.1),
+                    other => other,
+                });
+
+        if !peak_time_measure.is_some_and(|x| x.0 >= 0 && x.1 >= 0) {
+            eprintln!(
+                "{}: Измеренное время и размер данных не могут быть меньше нуля",
+                pack_csv_dir_entry_path.display(),
+            );
+            return Err(GraphError {
+                repr: GraphErrorRepr::ParseError,
+            }.into());
+        }
+
+        let peak_time_measure = peak_time_measure.unwrap();
+        let peak_time_measure = (peak_time_measure.0 as usize, peak_time_measure.1 as usize);
+        file_names_with_peak_time.push((algorithm_name.to_owned(), peak_time_measure));
+
         // eprintln!(
         //     "[create_time_total_csv]: algorithm(or dir)_name: {}",
         //     algorithm_name
         // );
     }
+    file_names_with_peak_time.sort_by(|a, b|
+        match a.1.0.cmp(&b.1.0) {
+            Ordering::Equal => a.1.1.cmp(&b.1.1),
+            other => other,
+        });
 
     let mut merged_rows: Vec<String> = Vec::new();
+    let mut header = String::from("\"size\"");
+    for entry in file_names_with_peak_time.iter() {
+        let file_path = PathBuf::from(entry.0.clone());
+        header.push_str(format!(",{:#?}", file_path.file_stem().unwrap()).as_str());
+    }
+    merged_rows.push(header);
     for size in sizes.iter() {
         let formatted_value = separate_row_value(size.to_string().as_str());
         let mut formatted_row = String::new();
@@ -179,8 +215,8 @@ where
         merged_rows.push(formatted_row);
     }
 
-    for i in 0..file_names.len() {
-        let file_path = csv_path.join(PathBuf::from_str(&file_names[i])?);
+    for entry in file_names_with_peak_time.iter() {
+        let file_path = csv_path.join(PathBuf::from_str(&entry.0)?);
         // eprintln!("[create_time_total_csv]: filename: {}", file_path);
 
         let (_header, rows) = read_csv_file(&file_path, false, 1)
@@ -194,19 +230,19 @@ where
                 let formatted_value = separate_row_value(row_value.as_str());
                 formatted_row.push_str(&formatted_value);
             }
-            merged_rows[i].push_str(formatted_row.as_str());
+            merged_rows[i+1].push_str(formatted_row.as_str());
         }
-        for i in rows.len()..merged_rows.len() {
-            merged_rows[i].push_str(",>");
+        for i in rows.len()..merged_rows.len()-1 {
+            merged_rows[i+1].push_str(",>");
             let formatted_value = separate_row_value(format!("{}", threshold.as_nanos()).as_str());
-            merged_rows[i].push_str(formatted_value.as_str());
+            merged_rows[i+1].push_str(formatted_value.as_str());
         }
     }
 
     let merged_string = merged_rows.join("\n");
 
-    let merged_csv_path = csv_path.join(PathBuf::from_str(TIME_RESULTS_CSV)?);
-    let mut file = fs::File::create(&merged_csv_path)?;
+    let time_total_path = time_total_dir.join(PathBuf::from_str(TIME_RESULTS_CSV)?);
+    let mut file = fs::File::create(&time_total_path)?;
 
     file.write_all(merged_string.as_bytes()).unwrap();
 
