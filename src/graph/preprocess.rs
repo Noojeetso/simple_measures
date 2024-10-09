@@ -202,10 +202,10 @@ where
         });
 
     let mut merged_rows: Vec<String> = Vec::new();
-    let mut header = String::from("\"size\"");
+    let mut header = String::from("size");
     for entry in file_names_with_peak_time.iter() {
         let file_path = PathBuf::from(entry.0.clone());
-        header.push_str(format!(",{:#?}", file_path.file_stem().unwrap()).as_str());
+        header.push_str(format!(",{}", file_path.file_stem().unwrap().to_str().unwrap()).as_str());
     }
     merged_rows.push(header);
     for size in sizes.iter() {
