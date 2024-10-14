@@ -2,9 +2,10 @@ use crate::description;
 
 use cpu_time::{ProcessTime, ThreadTime};
 use fs_err as fs;
+use indexmap::IndexMap;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+// use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::DerefMut;
@@ -178,13 +179,6 @@ where
         unsafe {
             println!("Алгоритм: {}", self.description);
             for size in sizes {
-                write!(
-                    lock,
-                    "Максимальный линейный размер входных данных: {}\t\r",
-                    size
-                )
-                .unwrap();
-                _ = std::io::stdout().flush();
                 let data = (generator.deref_mut())(size);
                 let res = nix_function_threshold::call_long_running_function(
                     &self.algorithm,
@@ -194,6 +188,13 @@ where
                 if res == false {
                     break;
                 }
+                write!(
+                    lock,
+                    "Максимальный линейный размер входных данных: {}\t\r",
+                    size
+                )
+                .unwrap();
+                _ = std::io::stdout().flush();
                 max_size_index += 1;
             }
             println!();
@@ -242,8 +243,11 @@ where
     iterations_amount: u64,
     use_threshold: bool,
     threshold: Duration,
-    time_statistics:
-        HashMap<&'a MeasurableAlgorithm<'a, 'c, GenArgT, AlgArgT, AlgResT>, AlgorithmTimeStatistic>,
+    time_statistics: IndexMap<
+        &'a MeasurableAlgorithm<'a, 'c, GenArgT, AlgArgT, AlgResT>,
+        AlgorithmTimeStatistic,
+    >,
+    // HashMap<&'a MeasurableAlgorithm<'a, 'c, GenArgT, AlgArgT, AlgResT>, AlgorithmTimeStatistic>,
     need_max_sizes_update: bool,
 }
 
@@ -259,7 +263,7 @@ impl<'a, 'b, 'c, GenArgT, AlgArgT, AlgResT> PackMeasures<'a, 'b, 'c, GenArgT, Al
             iterations_amount: 5,
             use_threshold: false,
             threshold: Duration::new(1, 0),
-            time_statistics: HashMap::new(),
+            time_statistics: IndexMap::new(),
             need_max_sizes_update: true,
         }
     }
