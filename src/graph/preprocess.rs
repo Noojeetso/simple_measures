@@ -131,7 +131,7 @@ where
     GenArgT: std::fmt::Display,
 {
     use std::cmp::Ordering;
-    fn separate_row_value(row_value_str: &str) -> String {
+    fn separate_digits_by_groups(row_value_str: &str) -> String {
         static DIGITS_IN_GROUP: usize = 3;
         let mut out_str = String::new();
         let chars = row_value_str.chars().collect::<Vec<char>>();
@@ -196,7 +196,7 @@ where
         // );
     }
     file_names_with_peak_time.sort_by(|a, b|
-        match a.1.0.cmp(&b.1.0) {
+        match b.1.0.cmp(&a.1.0) {
             Ordering::Equal => a.1.1.cmp(&b.1.1),
             other => other,
         });
@@ -209,7 +209,7 @@ where
     }
     merged_rows.push(header);
     for size in sizes.iter() {
-        let formatted_value = separate_row_value(size.to_string().as_str());
+        let formatted_value = separate_digits_by_groups(size.to_string().as_str());
         let mut formatted_row = String::new();
         formatted_row.push_str(&formatted_value);
         merged_rows.push(formatted_row);
@@ -227,14 +227,14 @@ where
             let mut formatted_row = String::new();
             for row_value in row {
                 formatted_row.push(',');
-                let formatted_value = separate_row_value(row_value.as_str());
+                let formatted_value = separate_digits_by_groups(row_value.as_str());
                 formatted_row.push_str(&formatted_value);
             }
             merged_rows[i+1].push_str(formatted_row.as_str());
         }
         for i in rows.len()..merged_rows.len()-1 {
             merged_rows[i+1].push_str(",>");
-            let formatted_value = separate_row_value(format!("{}", threshold.as_nanos()).as_str());
+            let formatted_value = separate_digits_by_groups(format!("{}", threshold.as_nanos()).as_str());
             merged_rows[i+1].push_str(formatted_value.as_str());
         }
     }
