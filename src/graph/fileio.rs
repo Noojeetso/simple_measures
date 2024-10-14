@@ -41,6 +41,7 @@ pub fn get_filename(path: &Path) -> Result<&str> {
     Ok(file_name)
 }
 
+#[allow(dead_code)]
 pub fn scan_nonnegative_number<T: Integer + std::str::FromStr>() -> Result<T>
 where
     <T as std::str::FromStr>::Err: StdError,
@@ -66,6 +67,7 @@ where
     Ok(res)
 }
 
+#[allow(dead_code)]
 pub fn scan_nonnegative_number_prompt<T: Integer + std::str::FromStr>(prompt: &str) -> Result<T>
 where
     <T as std::str::FromStr>::Err: StdError,
@@ -77,6 +79,7 @@ where
     scan_nonnegative_number::<T>()
 }
 
+#[allow(dead_code)]
 pub fn read_line() -> String {
     let mut line = String::new();
     std::io::stdin()
@@ -86,6 +89,7 @@ pub fn read_line() -> String {
     line
 }
 
+#[allow(dead_code)]
 pub fn read_prompt(prompt: &str) -> String {
     print!("{}", prompt);
     std::io::stdout()
@@ -157,30 +161,4 @@ pub fn recreate_dir_all(path: &std::path::Path) -> Result<()> {
     }
     fs::create_dir_all(path)?;
     Ok(())
-}
-
-pub fn input_vector() -> Result<Vec<i32>> {
-    let mut line: String = read_line();
-    line = line.trim().to_string();
-    let parts = line.split(" ").collect::<Vec<&str>>();
-    let elements_amount = parts.len();
-    if elements_amount == 0 {
-        let err = NonPositiveError;
-        return Err(err.into());
-    }
-
-    let mut vector: Vec<i32> = Vec::new();
-
-    for &part in parts.iter() {
-        let number: i32 = match part.parse::<i32>() {
-            Ok(num) => num,
-            Err(e) => {
-                println!("Ошибка сканирования числа");
-                return Err(e.into());
-            }
-        };
-        vector.push(number);
-    }
-
-    Ok(vector)
 }
